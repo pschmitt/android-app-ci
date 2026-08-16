@@ -223,17 +223,22 @@ import '.just/single-module.just'   # only the 3 single-module apps
 ```
 
 `just update-common` (defined in each app's own `justfile`, not in the shared files themselves)
-re-fetches both from this repo's `main` on demand.
+refreshes both from this repo's `main` on demand.
 
 ### How this gets into an app repo
 
 Not a git submodule (submodules interact badly with the fleet's heavy use of parallel git
 worktrees for agent-driven work - `git worktree add` doesn't check out submodules by default,
 and remembering `--init` per worktree is exactly the kind of friction this repo exists to remove).
-Instead: a plain committed copy, refreshed on demand via `curl` (`just update-common` for
-`just/*.just`; the GitHub Actions side doesn't need this since `uses: ...@main` always resolves
-fresh). This trades automatic freshness for simplicity and diffability - a `just/common.just`
-change shows up as a normal, reviewable diff in the app repo's next commit, not silently.
+Instead: a plain committed copy, refreshed on demand via [`vendir`](https://carvel.dev/vendir/)
+(`just update-common` runs `vendir sync`; the GitHub Actions side doesn't need this since
+`uses: ...@main` always resolves fresh). Each app repo has a `vendir.yml` declaring `.just/`
+sourced from this repo's `just/` directory (`newRootPath: just`, `includePaths` scoped to just
+`common.just` for jollyfin, both files for the 3 single-module apps) at `ref: main`, plus a
+committed `vendir.lock.yml` pinning the exact resolved commit SHA `vendir sync` last saw. This
+trades automatic freshness for simplicity and diffability - a `just/common.just` change only
+shows up in an app repo (as a normal, reviewable diff to both the vendored file and
+`vendir.lock.yml`) once someone runs `just update-common` there, never silently.
 
 ## Nix (`nix/devshells.nix`)
 
