@@ -10,9 +10,10 @@
 #
 # Used two ways:
 # - as a normal job step, via the wait-for-android-emulator composite action in this repo
-# - inline inside android-emulator-runner's own `script:` field (which runs plain shell text, not
-#   job steps, so a `uses:` composite action can't be called from there):
-#     bash <(curl -fsSL https://raw.githubusercontent.com/pschmitt/android-app-ci/main/scripts/wait-for-android-emulator.sh)
+# - inline inside android-emulator-runner's own `script:` field (which runs each line via `sh -c`,
+#   not job steps and not bash, so neither a `uses:` composite action nor bash-only process
+#   substitution works there - pipe into bash instead):
+#     curl -fsSL https://raw.githubusercontent.com/pschmitt/android-app-ci/main/scripts/wait-for-android-emulator.sh | bash
 
 set -u
 
@@ -51,9 +52,13 @@ main() {
   wait_for_android
 }
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]
-then
-  main "$@"
-fi
+# Always executed, never sourced (both call sites above run this file directly - as the composite
+# action's own step, or piped into a fresh `bash`) - unlike the sibling scripts vendored in each
+# app's own ci/, there's no in-repo caller that sources this one for its functions instead. The
+# usual "${BASH_SOURCE[0]}" == "${0}" guard some scripts use to support both breaks under `set -u`
+# when piped into bash rather than executed as a file: BASH_SOURCE is then an empty array, and
+# BASH_SOURCE[0] is an unbound reference into it - confirmed live ("BASH_SOURCE[0]: unbound
+# variable") on the very first real screenshots.yaml run after adopting this script fleet-wide.
+main "$@"
 
 # vim: set ft=sh et ts=2 sw=2 :
