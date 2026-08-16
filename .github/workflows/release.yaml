@@ -239,18 +239,25 @@ jobs:
         run: ./gradlew testDebugUnitTest
 
       - name: Build APKs
-        run: >
-          ./gradlew
-          ${{ steps.params.outputs.include_debug == 'true' && inputs.gradle-debug-task || '' }}
-          ${{ inputs.gradle-release-task }}
-          ${{ inputs.compute-version-name && format('-PversionName={0}', steps.version.outputs.name) || '' }}
-          --stacktrace --build-cache
+        # CI_KEYSTORE_* are only exported (not just left empty) when signing is enabled: an app's
+        # signingConfigs typically guard on `System.getenv("CI_KEYSTORE_PATH")?.let { ... }`, which
+        # only skips a null env var - an empty string still trips `file("")` inside Gradle. Setting
+        # `env: CI_KEYSTORE_PATH: ''` on this step would define the var (empty, not absent), so
+        # this exports conditionally in bash instead.
         env:
-          CI_KEYSTORE_PATH: ${{ inputs.enable-release-signing && steps.ci_keystore.outputs.path || '' }}
-          CI_KEYSTORE_PASSWORD: ${{ inputs.enable-release-signing && secrets.CI_KEYSTORE_PASSWORD || '' }}
-          CI_KEY_ALIAS: ${{ inputs.enable-release-signing && secrets.CI_KEY_ALIAS || '' }}
-          CI_KEY_PASSWORD: ${{ inputs.enable-release-signing && secrets.CI_KEY_PASSWORD || '' }}
           GIT_REVISION: ${{ steps.git_revision.outputs.value }}
+        run: |
+          if [[ "${{ inputs.enable-release-signing }}" == "true" ]]; then
+            export CI_KEYSTORE_PATH="${{ steps.ci_keystore.outputs.path }}"
+            export CI_KEYSTORE_PASSWORD="${{ secrets.CI_KEYSTORE_PASSWORD }}"
+            export CI_KEY_ALIAS="${{ secrets.CI_KEY_ALIAS }}"
+            export CI_KEY_PASSWORD="${{ secrets.CI_KEY_PASSWORD }}"
+          fi
+          ./gradlew \
+            ${{ steps.params.outputs.include_debug == 'true' && inputs.gradle-debug-task || '' }} \
+            ${{ inputs.gradle-release-task }} \
+            ${{ inputs.compute-version-name && format('-PversionName={0}', steps.version.outputs.name) || '' }} \
+            --stacktrace --build-cache
 
       - name: Verify embedded Android version name
         if: inputs.compute-version-name
