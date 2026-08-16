@@ -1,0 +1,195 @@
+name: Reusable / Open screenshots PR
+
+# Shared tail end of every app's Screenshots workflow: download the phone/sevenInch/tenInch
+# screenshot artifacts a caller's own `capture` job produced (fixture setup differs too much per
+# app - NetBox/Jellyfin/Mealie/none - to centralize that job itself), flatten them into
+# fastlane's metadata layout, and open or update a single stable PR with an inline image gallery.
+# A stable branch name (not keyed by run_id) plus a force-push means repeated dispatches update
+# the same PR in place instead of piling up a new one per run.
+#
+# Caller contract: its `capture` job must upload three artifacts named
+# "<artifact-label>-phone-screenshots-${{ github.run_id }}", "...-sevenInch-...", and
+# "...-tenInch-...", each containing (among other things) the corresponding
+# fastlane/metadata/android/en-US/images/<type>Screenshots/*.png files.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-label:
+        description: Must match the prefix the caller's capture job uploaded screenshot artifacts under
+        type: string
+        required: true
+      commit-message:
+        type: string
+        default: "chore: update Play Store screenshots (phone, 7in, 10in tablet)"
+      sync-readme:
+        description: Run an extra step copying selected phone-bucket screenshots into README image paths
+        type: boolean
+        default: false
+      readme-images:
+        description: >-
+          Only used when sync-readme is true. One entry per line, "<phone-screenshot-filename-prefix>|<destination-path>|<match-suffix-glob>",
+          e.g. "01_dashboard|docs/images/readme-dashboard.png|_light_[0-9]*.png".
+        type: string
+        default: ''
+      pr-body-intro:
+        description: Extra sentence appended to the "opened a new PR" body, e.g. mentioning that merging it also refreshes the README gallery
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  open-pr:
+    name: Open PR with updated screenshots
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # GITHUB_TOKEN can never push a branch whose commit range touches .github/workflows/* - a
+      # repo's main history (including this workflow file's own past fix-up commits) always will,
+      # so every branch built from it trips that restriction regardless of what this job's own
+      # commit changes ("refusing to allow a GitHub App to create or update workflow ... without
+      # `workflows` permission" - not a scope grantable via the `permissions:` key above). Needs a
+      # fine-grained PAT (scoped to just this repo: Contents + Pull requests + Workflows, all read
+      # & write) in the WORKFLOW_PUSH_TOKEN repo secret - falls back to the default token when
+      # that secret isn't set, which reproduces the same failure so it's obvious what's missing
+      # rather than silently no-op-ing.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.WORKFLOW_PUSH_TOKEN || github.token }}
+
+      - name: Download phone screenshots
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-label }}-phone-screenshots-${{ github.run_id }}
+          path: fastlane/metadata/android/en-US/images/phoneScreenshots
+
+      - name: Download sevenInch screenshots
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-label }}-sevenInch-screenshots-${{ github.run_id }}
+          path: fastlane/metadata/android/en-US/images/sevenInchScreenshots
+
+      - name: Download tenInch screenshots
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-label }}-tenInch-screenshots-${{ github.run_id }}
+          path: fastlane/metadata/android/en-US/images/tenInchScreenshots
+
+      # Each device-type artifact was uploaded alongside other paths (androidTest reports,
+      # failure screenshots, ...), so it unpacks with the actual .pngs nested some levels deep
+      # rather than directly in the download path. Find them regardless of exact depth and drop
+      # everything else before committing.
+      - name: Flatten downloaded artifacts to just the screenshots
+        run: |
+          for device_type in phone sevenInch tenInch; do
+            dir="fastlane/metadata/android/en-US/images/${device_type}Screenshots"
+            find "$dir" -mindepth 2 -iname '*.png' -exec mv {} "$dir/" \;
+            find "$dir" -mindepth 1 -type d -exec rm -rf {} +
+          done
+
+      - name: Sync README screenshots from the phone bucket
+        if: inputs.sync-readme
+        env:
+          README_IMAGES: ${{ inputs.readme-images }}
+        run: |
+          src="fastlane/metadata/android/en-US/images/phoneScreenshots"
+          while IFS='|' read -r prefix dest suffix; do
+            [ -n "$prefix" ] || continue
+            match="$(find "$src" -iname "${prefix}${suffix}" | head -n1)"
+            test -n "$match" || { echo "No capture found for $prefix (pattern ${prefix}${suffix})" >&2; exit 1; }
+            mkdir -p "$(dirname "$dest")"
+            cp "$match" "$dest"
+          done <<< "$README_IMAGES"
+
+      - name: Check for changes
+        id: diff
+        run: |
+          git add fastlane/metadata/android/en-US/images
+          if [ "${{ inputs.sync-readme }}" = "true" ]; then
+            git add $(printf '%s\n' "${{ inputs.readme-images }}" | cut -d'|' -f2 | xargs -r dirname | sort -u)
+          fi
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and force-push
+        if: ${{ steps.diff.outputs.changed == 'true' }}
+        id: commit
+        env:
+          COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        run: |
+          branch="screenshots/update"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git commit -m "$COMMIT_MESSAGE"
+          git push --force origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The PR diff is just-renamed binary PNGs, next to unreviewable without opening every file -
+      # embed each one inline instead, addressed at this exact commit (not the branch, which gets
+      # force-pushed again on the next run) so a comment's images never silently change under a
+      # reviewer after the fact.
+      - name: Build inline image gallery
+        if: ${{ steps.diff.outputs.changed == 'true' }}
+        id: gallery
+        run: |
+          sha="${{ steps.commit.outputs.sha }}"
+          gallery_file="$(mktemp)"
+          for device_type in phone sevenInch tenInch; do
+            dir="fastlane/metadata/android/en-US/images/${device_type}Screenshots"
+            shopt -s nullglob
+            files=("$dir"/*.png)
+            [ ${#files[@]} -eq 0 ] && continue
+            {
+              echo "<details open>"
+              echo "<summary><strong>${device_type}</strong> (${#files[@]} images)</summary>"
+              echo
+              for f in "${files[@]}"; do
+                name="$(basename "$f")"
+                url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${sha}/${f}"
+                printf '<img src="%s" width="200" alt="%s" title="%s">\n' "$url" "$name" "$name"
+              done
+              echo
+              echo "</details>"
+              echo
+            } >> "$gallery_file"
+          done
+          echo "path=$gallery_file" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the PR
+        if: ${{ steps.diff.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PUSH_TOKEN || github.token }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          GALLERY_FILE: ${{ steps.gallery.outputs.path }}
+          PR_BODY_INTRO: ${{ inputs.pr-body-intro }}
+        run: |
+          existing_pr="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          body_file="$(mktemp)"
+          if [ -n "$existing_pr" ]; then
+            {
+              echo "Updated with fresh screenshots from run ${{ github.run_id }}."
+              echo
+              cat "$GALLERY_FILE"
+            } > "$body_file"
+            gh pr comment "$existing_pr" --body-file "$body_file"
+          else
+            {
+              echo "Automated screenshot refresh from the \`Screenshots\` workflow (run ${{ github.run_id }}). Review the images below before merging.${PR_BODY_INTRO:+ $PR_BODY_INTRO}"
+              echo
+              echo "Re-running this workflow with \`open_pr\` updates this same PR instead of opening a new one."
+              echo
+              cat "$GALLERY_FILE"
+            } > "$body_file"
+            gh pr create --title "Update screenshots" --body-file "$body_file" --head "$BRANCH" --base "${{ github.ref_name }}"
+          fi

@@ -1,0 +1,15 @@
+name: Enable KVM
+description: >-
+  Grants the job user access to /dev/kvm on GitHub-hosted runners. GitHub-hosted runners ship
+  /dev/kvm but don't grant the job user access to it by default, so without this the Android
+  emulator silently falls back to software-only emulation and takes 15+ minutes to boot.
+
+runs:
+  using: composite
+  steps:
+    - name: Enable KVM group perms
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm

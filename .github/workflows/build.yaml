@@ -1,0 +1,119 @@
+name: Reusable / Build
+
+# Shared debug-build pipeline: unit tests, `./gradlew <gradle-task>`, then one upload-artifact
+# step per ABI split so downstream jobs/consumers can download a single named APK instead of a
+# bundle (actions/upload-artifact can't be looped from a data list in a single job - see
+# https://github.com/actions/upload-artifact/issues/354 - so this fixes the shape at 4 ABI splits
+# and parameterizes the module/task/output-dir/artifact-name-prefix around it. A multi-module app
+# (e.g. one with separate phone/tv Gradle modules) calls this reusable workflow once per module
+# with a different gradle-task/apk-dir/artifact-prefix, setting run-unit-tests: false on every
+# call after the first).
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        type: string
+        default: '21.0.11'
+      run-unit-tests:
+        type: boolean
+        default: true
+      unit-test-task:
+        type: string
+        default: testDebugUnitTest
+      gradle-task:
+        description: Gradle task that produces the debug APK(s), e.g. assembleDebug or :app:tv:assembleLibreDebug
+        type: string
+        default: assembleDebug
+      apk-dir:
+        description: Directory the built ABI-split debug APKs land in
+        type: string
+        default: app/build/outputs/apk/debug
+      artifact-prefix:
+        description: Filename prefix before "-<abi>-debug.apk", matching the Gradle-produced filenames
+        type: string
+        default: app
+      upload-artifacts:
+        type: boolean
+        default: true
+      compute-version-name:
+        description: >-
+          Derive a version name from `git describe` and pass it as -PversionName=<name>, plus
+          verify it's actually embedded in the built APK afterwards (aapt2 dump badging).
+        type: boolean
+        default: false
+
+jobs:
+  assemble:
+    name: Assemble
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: ${{ inputs.compute-version-name && 0 || 1 }}
+      - uses: pschmitt/android-app-ci/.github/actions/setup-jdk-gradle@main
+        with:
+          java-version: ${{ inputs.java-version }}
+
+      - name: Compute build metadata
+        if: inputs.compute-version-name
+        id: metadata
+        run: |
+          revision="$(git describe --always --abbrev=12 --dirty --exclude=latest)"
+          if [[ "$revision" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)([-+].*)?$ ]]; then
+            version_name="${BASH_REMATCH[1]}"
+          else
+            version_name="0.1.0"
+          fi
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+
+      - name: Run unit tests
+        if: inputs.run-unit-tests
+        run: ./gradlew ${{ inputs.unit-test-task }}
+
+      - name: Build with Gradle
+        run: >
+          ./gradlew ${{ inputs.gradle-task }}
+          ${{ inputs.compute-version-name && format('-PversionName={0}', steps.metadata.outputs.version_name) || '' }}
+        env:
+          GIT_REVISION: ${{ inputs.compute-version-name && steps.metadata.outputs.revision || '' }}
+
+      - name: Verify embedded Android version name
+        if: inputs.compute-version-name
+        env:
+          EXPECTED_VERSION: ${{ steps.metadata.outputs.version_name }}
+        run: |
+          aapt2_path="$(ls -1d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n1)"
+          apk="${{ inputs.apk-dir }}/${{ inputs.artifact-prefix }}-arm64-v8a-debug.apk"
+          actual_version="$($aapt2_path dump badging "$apk" | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p")"
+          if [[ "$actual_version" != "$EXPECTED_VERSION" ]]; then
+            echo "expected Android version $EXPECTED_VERSION, got $actual_version" >&2
+            exit 1
+          fi
+
+      - name: Upload artifact ${{ inputs.artifact-prefix }}-arm64-v8a-debug.apk
+        if: inputs.upload-artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-prefix }}-arm64-v8a-debug.apk
+          path: ${{ inputs.apk-dir }}/${{ inputs.artifact-prefix }}-arm64-v8a-debug.apk
+      - name: Upload artifact ${{ inputs.artifact-prefix }}-armeabi-v7a-debug.apk
+        if: inputs.upload-artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-prefix }}-armeabi-v7a-debug.apk
+          path: ${{ inputs.apk-dir }}/${{ inputs.artifact-prefix }}-armeabi-v7a-debug.apk
+      - name: Upload artifact ${{ inputs.artifact-prefix }}-x86_64-debug.apk
+        if: inputs.upload-artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-prefix }}-x86_64-debug.apk
+          path: ${{ inputs.apk-dir }}/${{ inputs.artifact-prefix }}-x86_64-debug.apk
+      - name: Upload artifact ${{ inputs.artifact-prefix }}-x86-debug.apk
+        if: inputs.upload-artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-prefix }}-x86-debug.apk
+          path: ${{ inputs.apk-dir }}/${{ inputs.artifact-prefix }}-x86-debug.apk

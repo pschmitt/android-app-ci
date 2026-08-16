@@ -1,0 +1,28 @@
+name: Decode CI signing keystore
+description: >-
+  Decodes the fleet's base64-encoded release-signing keystore secret to a file. Every app in the
+  fleet uses the same secret names (CI_KEYSTORE_BASE64, CI_KEYSTORE_PASSWORD, CI_KEY_ALIAS,
+  CI_KEY_PASSWORD) for its own per-app keystore, so only the on-disk filename varies.
+
+inputs:
+  keystore-base64:
+    description: Base64-encoded keystore (secrets.CI_KEYSTORE_BASE64)
+    required: true
+  file-name:
+    description: Filename to decode the keystore to, e.g. <app>-ci.jks
+    required: true
+
+outputs:
+  path:
+    description: Path to the decoded keystore file
+    value: ${{ steps.decode.outputs.filePath }}
+
+runs:
+  using: composite
+  steps:
+    - name: Decode CI signing keystore
+      id: decode
+      uses: timheuer/base64-to-file@v2
+      with:
+        fileName: ${{ inputs.file-name }}
+        encodedString: ${{ inputs.keystore-base64 }}

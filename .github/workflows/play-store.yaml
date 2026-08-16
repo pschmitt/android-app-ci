@@ -1,0 +1,191 @@
+name: Reusable / Play Store Release
+
+# Builds a signed AAB and, when requested, publishes it to the Play internal-testing track. The
+# publish job additionally requires the repository variable PLAY_PUBLISH_ENABLED=true and a
+# PLAY_SERVICE_ACCOUNT_JSON secret - neither exists until those are deliberately set up in
+# Settings > Secrets and variables, so a caller can safely wire `publish: true` on every tag push
+# without risking an accidental publish on a fresh checkout: publish-gate fails loudly instead of
+# silently no-op'ing when PLAY_PUBLISH_ENABLED isn't set.
+#
+# Callers keep their own `on:` block (their tag pattern + a workflow_dispatch with version_code/
+# version_name/publish inputs) and pass those straight through - see README.md for a template.
+
+on:
+  workflow_call:
+    inputs:
+      application-id:
+        description: Play Store packageName, e.g. dev.pschmitt.nyetbox
+        type: string
+        required: true
+      artifact-label:
+        description: Filename/branch-safe slug used to prefix the uploaded AAB artifact name
+        type: string
+        required: true
+      java-version:
+        type: string
+        default: '21.0.11'
+      keystore-file-name:
+        type: string
+        default: ''
+      gradle-bundle-task:
+        description: Gradle task that produces the signed release bundle, e.g. bundleRelease or :app:phone:bundleRelease
+        type: string
+        default: bundleRelease
+      aab-path:
+        type: string
+        default: app/build/outputs/bundle/release/app-release.aab
+      version-code:
+        description: Override versionCode. Leave empty to use the app's own build.gradle.kts default.
+        type: string
+        default: ''
+      version-name:
+        description: Override versionName. Leave empty to use the app's own build.gradle.kts default.
+        type: string
+        default: ''
+      publish:
+        description: Upload the bundle to the Play internal-testing track (still gated by the PLAY_PUBLISH_ENABLED repo variable)
+        type: boolean
+        default: false
+      track:
+        type: string
+        default: internal
+
+concurrency:
+  group: play-store-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  params:
+    name: Validate build parameters
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate manual overrides
+        env:
+          RELEASE_VERSION_CODE: ${{ inputs.version-code }}
+          RELEASE_VERSION_NAME: ${{ inputs.version-name }}
+        run: |
+          [[ -z "$RELEASE_VERSION_CODE" || "$RELEASE_VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || {
+            echo "version-code must be a positive integer" >&2
+            exit 1
+          }
+          [[ -z "$RELEASE_VERSION_NAME" || "$RELEASE_VERSION_NAME" =~ ^[0-9A-Za-z][0-9A-Za-z.+_-]*$ ]] || {
+            echo "version-name contains unsupported characters" >&2
+            exit 1
+          }
+
+  bundle:
+    name: Validate and build signed AAB
+    needs: params
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: pschmitt/android-app-ci/.github/actions/setup-jdk-gradle@main
+        with:
+          java-version: ${{ inputs.java-version }}
+
+      - name: Decode CI signing keystore
+        id: ci_keystore
+        uses: pschmitt/android-app-ci/.github/actions/decode-ci-keystore@main
+        with:
+          keystore-base64: ${{ secrets.CI_KEYSTORE_BASE64 }}
+          file-name: ${{ inputs.keystore-file-name != '' && inputs.keystore-file-name || format('{0}-ci.jks', inputs.artifact-label) }}
+
+      - name: Compute build metadata
+        id: metadata
+        run: |
+          echo "revision=$(git describe --always --abbrev=12 --dirty --exclude=latest)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest
+
+      - name: Build signed Android App Bundle
+        # -P overrides are only appended when actually set, so a tag push falls through to the
+        # app's own build.gradle.kts defaults exactly like release.yaml's assembleRelease does.
+        env:
+          RELEASE_VERSION_CODE: ${{ inputs.version-code }}
+          RELEASE_VERSION_NAME: ${{ inputs.version-name }}
+          CI_KEYSTORE_PATH: ${{ steps.ci_keystore.outputs.path }}
+          CI_KEYSTORE_PASSWORD: ${{ secrets.CI_KEYSTORE_PASSWORD }}
+          CI_KEY_ALIAS: ${{ secrets.CI_KEY_ALIAS }}
+          CI_KEY_PASSWORD: ${{ secrets.CI_KEY_PASSWORD }}
+          GIT_REVISION: ${{ steps.metadata.outputs.revision }}
+          BUILD_DATE: ${{ steps.metadata.outputs.date }}
+        run: |
+          args=(${{ inputs.gradle-bundle-task }} --stacktrace --build-cache)
+          [[ -n "$RELEASE_VERSION_CODE" ]] && args+=("-PversionCode=$RELEASE_VERSION_CODE")
+          [[ -n "$RELEASE_VERSION_NAME" ]] && args+=("-PversionName=$RELEASE_VERSION_NAME")
+          ./gradlew "${args[@]}"
+
+      - name: Verify bundle output
+        run: |
+          bundle="${{ inputs.aab-path }}"
+          test -s "$bundle" || {
+            echo "Expected signed bundle was not produced: $bundle" >&2
+            exit 1
+          }
+
+      - name: Upload Play artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-label }}-${{ github.ref_name }}-aab
+          path: ${{ inputs.aab-path }}
+          if-no-files-found: error
+
+  publish-gate:
+    name: Reject accidental publishing
+    needs: [params, bundle]
+    if: ${{ inputs.publish && vars.PLAY_PUBLISH_ENABLED != 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require the repository-level publication gate
+        run: |
+          echo "Publishing was requested, but PLAY_PUBLISH_ENABLED is not true." >&2
+          echo "Set that repository variable only after Play Console and service-account setup." >&2
+          exit 1
+
+  publish:
+    name: Upload to Play ${{ inputs.track }} track
+    needs: [params, bundle]
+    if: ${{ inputs.publish && vars.PLAY_PUBLISH_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download Play artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-label }}-${{ github.ref_name }}-aab
+          path: play-artifact
+
+      - name: Check publication credentials
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          test -n "$PLAY_SERVICE_ACCOUNT_JSON" || {
+            echo "PLAY_SERVICE_ACCOUNT_JSON is required when publishing is enabled." >&2
+            exit 1
+          }
+
+      - name: Locate downloaded bundle
+        # aab-path's basename varies per caller (e.g. app-release.aab vs phone-release.aab), so
+        # find it rather than hardcoding a name here.
+        id: locate
+        run: |
+          file="$(find play-artifact -maxdepth 1 -name '*.aab' | head -n1)"
+          test -n "$file" || { echo "no .aab found in play-artifact/" >&2; exit 1; }
+          echo "path=$file" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bundle
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ inputs.application-id }}
+          releaseFiles: ${{ steps.locate.outputs.path }}
+          tracks: ${{ inputs.track }}
+          status: completed

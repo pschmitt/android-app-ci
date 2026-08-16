@@ -1,0 +1,130 @@
+name: Reusable / Lint
+
+# Shared ktfmt + Android Lint pipeline for the Android app fleet. Callers keep a thin workflow
+# with their own `on:` triggers (paths differ slightly per app) that calls this with `uses:` and
+# `secrets: inherit`. See README.md in this repo for a caller template.
+#
+# The ktfmt and Android Lint checks run as independent parallel jobs so a failure in one doesn't
+# hide or block the other - both report in a single run instead of needing a fix-push-fail-fix-push
+# cycle per issue. When ktfmtCheck fails - on any trigger - the `ktfmt` job uploads a
+# `ktfmt-diff-patch` artifact containing exactly what `./gradlew ktfmtFormat` would change, and
+# (when enable-auto-fix is true) additionally tries to land that same fix automatically: pushed
+# straight onto a same-repo PR's branch (pre-merge, safe to amend in place), or opened as a new PR
+# when the failure came from a direct push to main with no PR to push into. A fork PR can't be
+# pushed to by GITHUB_TOKEN at all, so that case only gets the patch artifact.
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        type: string
+        default: '21.0.11'
+      lint-baseline-path:
+        description: >-
+          Path to the app's lint-baseline.xml. Empty string skips the "reject unreviewed
+          lint-baseline changes" step entirely.
+        type: string
+        default: app/lint-baseline.xml
+      enable-auto-fix:
+        description: >-
+          Push a ktfmt formatting fix onto the PR branch (same-repo PRs only), or open a new PR
+          with the fix for a direct push to main with no PR to push into.
+        type: boolean
+        default: true
+
+jobs:
+  ktfmt:
+    name: ktfmt
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # For a PR, check out the actual head branch rather than the ephemeral merge ref, so a
+          # formatting fix (below) can be pushed straight back onto it.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+      - uses: pschmitt/android-app-ci/.github/actions/setup-jdk-gradle@main
+        with:
+          java-version: ${{ inputs.java-version }}
+      - name: Check with ktfmt
+        id: ktfmt_check
+        run: ./gradlew ktfmtCheck
+      - name: Produce ktfmt diff patch
+        if: ${{ failure() && steps.ktfmt_check.outcome == 'failure' }}
+        run: |
+          ./gradlew ktfmtFormat
+          git diff > /tmp/ktfmt.patch
+      - name: Upload ktfmt diff patch
+        if: ${{ failure() && steps.ktfmt_check.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ktfmt-diff-patch
+          path: /tmp/ktfmt.patch
+          if-no-files-found: error
+      - name: Commit formatting fix onto this PR's branch
+        # Only for a same-repo PR - GITHUB_TOKEN can't push to a fork's branch at all, so that case
+        # falls back to the uploaded patch artifact above. This push won't retrigger this workflow
+        # (GITHUB_TOKEN-authored pushes don't start new runs), so it isn't independently
+        # reverified by CI - the fix is mechanical reformatting only, and a reviewer/re-run can
+        # always confirm.
+        if: >-
+          ${{ inputs.enable-auto-fix && failure() && steps.ktfmt_check.outcome == 'failure' &&
+              github.event_name == 'pull_request' &&
+              github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- '*.kt' '*.kts'
+          git commit -m "style: apply ktfmt formatting"
+          git push origin "HEAD:$HEAD_REF"
+      - name: Open a PR with the formatting fix
+        # No existing PR to push into for a direct push (e.g. to main) - open a new one instead of
+        # amending the pushed branch directly.
+        if: >-
+          ${{ inputs.enable-auto-fix && failure() && steps.ktfmt_check.outcome == 'failure' &&
+              github.event_name != 'pull_request' }}
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "style: apply ktfmt formatting"
+          title: "style: apply ktfmt formatting"
+          body: >-
+            Automated ktfmt formatting fix - `ktfmtCheck` failed on
+            ${{ github.sha }} (`${{ github.ref_name }}`).
+          branch: ci/ktfmt-format-fix
+          add-paths: |
+            **.kt
+            **.kts
+
+  android-lint:
+    name: Android Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - uses: pschmitt/android-app-ci/.github/actions/setup-jdk-gradle@main
+        with:
+          java-version: ${{ inputs.java-version }}
+      - name: Run Android Lint
+        run: ./gradlew lintDebug
+      - name: Reject unreviewed lint-baseline changes
+        if: ${{ inputs.lint-baseline-path != '' && !cancelled() }}
+        env:
+          BASELINE_PATH: ${{ inputs.lint-baseline-path }}
+        run: |
+          ./gradlew updateLintBaselineDebug
+          # AGP records absolute paths for the version catalog. Keep the reviewed baseline
+          # portable between the remote build hosts and the GitHub Actions checkout.
+          sed -E -i 's#file="[^"]*/gradle/libs\.versions\.toml"#file="gradle/libs.versions.toml"#g' "$BASELINE_PATH"
+          git diff --exit-code -- "$BASELINE_PATH"
+      - name: Upload Android Lint report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: warn

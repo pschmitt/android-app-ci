@@ -1,0 +1,79 @@
+name: Reusable / Play Store Assets
+
+# Screenshot/icon uploads to the Play Console listing are content-triggered, not tag-triggered:
+# whenever a change to the committed screenshot images lands on main - i.e. the "Update
+# screenshots" PR that the screenshots workflow opens gets merged - push exactly what's now in the
+# repo to the release package's Play Console listing. Requires the same PLAY_SERVICE_ACCOUNT_JSON
+# secret as play-store.yaml; until that's configured this fails loudly rather than silently
+# no-op-ing. Delegates the actual upload to `just screenshots-upload` in the caller's own
+# justfile, so each app keeps control of exactly what gets pushed (screenshots only, screenshots +
+# icon, etc).
+
+on:
+  workflow_call:
+    inputs:
+      application-id:
+        description: Play Console default package, e.g. dev.pschmitt.nyetbox
+        type: string
+        required: true
+      gpc-version:
+        description: playconsole-cli version. Keep in sync with the version pinned for local `just screenshots-upload` runs (nixos-config's pkgs/playconsole-cli).
+        type: string
+        default: '0.5.15'
+
+concurrency:
+  group: play-store-images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    name: Upload screenshots to Play Console
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check publication credentials
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          test -n "$PLAY_SERVICE_ACCOUNT_JSON" || {
+            echo "PLAY_SERVICE_ACCOUNT_JSON is required to upload Play Console images." >&2
+            echo "Set it to the same Play Console service-account JSON key used by play-store.yaml." >&2
+            exit 1
+          }
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Install gpc (playconsole-cli)
+        env:
+          GPC_VERSION: ${{ inputs.gpc-version }}
+        run: |
+          curl -fsSL \
+            "https://github.com/AndroidPoet/playconsole-cli/releases/download/v${GPC_VERSION}/playconsole-cli_${GPC_VERSION}_linux_amd64.tar.gz" \
+            -o /tmp/gpc.tar.gz
+          tar -xzf /tmp/gpc.tar.gz -C /tmp playconsole-cli
+          sudo install -m 755 /tmp/playconsole-cli /usr/local/bin/gpc
+
+      - name: Authenticate gpc
+        # gpc's file-based credential type stores a *path reference* to this file, not a copy of
+        # its contents - confirmed live: deleting it right after `auth login` left every later gpc
+        # call unable to read credentials at all. The runner is torn down at the end of the job
+        # regardless, so there's nothing to clean up here.
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          APPLICATION_ID: ${{ inputs.application-id }}
+        run: |
+          creds_file="$(mktemp)"
+          printf '%s' "$PLAY_SERVICE_ACCOUNT_JSON" > "$creds_file"
+          gpc auth login --name default --credentials "$creds_file" --default-package "$APPLICATION_ID"
+
+      - name: Upload screenshots
+        run: just screenshots-upload
