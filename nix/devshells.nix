@@ -11,25 +11,25 @@
 #
 #   ...
 #
-#   androidDevShells = import "${android-app-ci}/nix/devshells.nix" {
+#   androidEnv = import "${android-app-ci}/nix/devshells.nix" {
 #     inherit pkgs android-nixpkgs system;
 #     appName = "Nyetbox";
 #     buildToolsVersion = "37.0.0";
 #     platformVersion = "37";
-#     enableGitHooks = true;
-#     gitHooksLib = git-hooks.lib;
+#     gitHooksLib = git-hooks.lib;    # null to skip pre-commit entirely
 #     preCommitExtra = {
 #       check-added-large-files.excludes = [ "^ci/netbox/fixtures/.*\\.dump$" ];
 #     };
 #     extraPackages = [ nyetboxSetup ];
-#     screenshotsSystemImage = "system-images-android-34-google-apis-x86-64";
+#     screenshotsSystemImage = "system-images-android-34-google-apis-x86-64"; # null to skip
 #     quickStart = ''
 #       echo "  just build                    # Build debug APK on rofl-13"
 #     '';
 #   };
 #
 # in {
-#   devShells.${system} = androidDevShells;
+#   devShells.${system} = androidEnv.devShells;
+#   checks.${system} = androidEnv.checks;         # only present if gitHooksLib was set
 # }
 {
   pkgs,
@@ -187,8 +187,10 @@ in
     };
   };
 }
-// pkgs.lib.optionalAttrs (pre-commit-check != null) {
-  checks = {
+// {
+  # Always present (possibly empty) so callers can unconditionally write
+  # `checks.${system} = androidEnv.checks;` without an `or {}` guard.
+  checks = pkgs.lib.optionalAttrs (pre-commit-check != null) {
     inherit pre-commit-check;
   };
 }
