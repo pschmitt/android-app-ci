@@ -15,12 +15,13 @@
 # `just` invocation runs, regardless of the import statement's position - each app keeps its own
 # trivial `default: @just --list` as the literal first recipe in its own justfile instead.
 #
-# Only recipes that need *no* app-specific variables live here, deliberately: the remote
-# sync/build/deploy pipeline (rofl-13/rofl-14, the worktree-suffix trick, per-app keystore/rbw
-# entries, ABI-split vs. universal APKs, device-specific deploy targets) still differs enough
-# between apps - an extra Gradle property here, no ABI split there, a signed release build there -
-# that force-fitting it into one shared recipe risks silently changing behavior. That's a good
-# candidate for a follow-up pass with more per-app verification, not this one.
+# Every app in the fleet imports this file - it only has recipes with no build-topology
+# assumptions (no module axis, no remote-build pipeline). The single-module remote build/deploy
+# pipeline (sync/gradle/build/fetch/device-deploy) lives in the sibling just/single-module.just
+# instead, imported only by the 3 apps that actually have one Gradle module (nyetbox, augh,
+# syncwich) - jollyfin is multi-module (app/phone + app/tv) and keeps its own local versions of
+# those instead, since `build`/`fetch`/`deploy-*` need a module axis single-module.just doesn't
+# have.
 #
 # Variables an importing justfile must define before this recipe is used:
 #   play_package  - Play Console packageName, only needed for `screenshots-upload`
