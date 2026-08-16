@@ -43,9 +43,13 @@ jobs:
   ktfmt:
     name: ktfmt
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      pull-requests: write
+    # No permissions: block here deliberately - a reusable-workflow job that declares permissions
+    # exceeding what the calling job grants fails outright (startup_failure, no logs) rather than
+    # just running with the lesser set. Letting this job inherit whatever the caller granted means
+    # a caller that wants enable-auto-fix must grant contents: write / pull-requests: write itself
+    # (see this repo's README caller template), and one that doesn't (enable-auto-fix: false) can
+    # grant only contents: read - the auto-fix steps below are already gated on enable-auto-fix and
+    # simply fail if dispatched without write access, same as any other under-permissioned step.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
