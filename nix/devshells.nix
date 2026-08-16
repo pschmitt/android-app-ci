@@ -132,9 +132,6 @@ in
         android-composition
         pkgs.just
         pkgs.ktfmt
-        # Vendors just/*.just from android-app-ci (see vendir.yml) - `just update-common` runs
-        # `vendir sync`.
-        pkgs.vendir
       ]
       ++ extraPackages;
 
@@ -142,6 +139,16 @@ in
         (if pre-commit-check != null then pre-commit-check.shellHook else "")
         + ''
           echo "Development environment: ${appName}"
+
+          # git worktree add doesn't check out submodules by default, so a fresh agent worktree
+          # (this fleet creates a lot of them - .claude/worktrees/, .codex/worktrees/, ...) would
+          # otherwise leave .just/android-app-ci empty until someone remembers to run
+          # `git submodule update --init` by hand - which breaks every `just` invocation outright,
+          # since `import`ing a file that doesn't exist yet is a hard parse error, not a soft
+          # skip. Auto-init on every shell entry instead so this is never a manual step.
+          if [ -f .gitmodules ] && git rev-parse --git-dir >/dev/null 2>&1; then
+            git submodule update --init --recursive --quiet
+          fi
 
           export JAVA_HOME=${jdk}/lib/openjdk
           export ANDROID_SDK_ROOT=${android-composition}/share/android-sdk
