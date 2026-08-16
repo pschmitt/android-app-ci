@@ -77,6 +77,13 @@ on:
         description: Delete release assets on the rolling "latest" tag that this run didn't (re)upload
         type: boolean
         default: true
+      verify-git-revision:
+        description: >-
+          Grep every release APK's dex for the exact commit SHA (BuildConfig.GIT_REVISION). Only
+          meaningful if the app's build.gradle.kts actually reads the GIT_REVISION env var into
+          BuildConfig - set false for an app that doesn't.
+        type: boolean
+        default: true
 
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
@@ -263,6 +270,7 @@ jobs:
       - name: Verify embedded git revision
         # Confirms GIT_REVISION actually made it into every release artifact instead of silently
         # falling back to "unknown".
+        if: inputs.verify-git-revision
         env:
           REVISION: ${{ steps.git_revision.outputs.value }}
         run: |
