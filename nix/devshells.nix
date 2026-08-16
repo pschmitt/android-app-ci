@@ -104,6 +104,7 @@ let
     trim-trailing-whitespace.enable = true;
     end-of-file-fixer.enable = true;
     check-merge-conflicts.enable = true;
+    check-added-large-files.enable = true;
     check-yaml.enable = true;
     nixfmt.enable = true;
     statix.enable = true;
