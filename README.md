@@ -26,11 +26,13 @@ denominator.
 - **`wait-for-android-emulator`** - waits for a booted emulator to actually be ready for UI input,
   not just for `sys.boot_completed`. Replaces each repo's hand-copied `ci/android-e2e-wait.sh` /
   `ci/android-emulator-wait.sh` for use as a normal job step. `android-emulator-runner`'s own
-  `script:` input runs plain inline shell (not job steps), so a composite action can't be `uses:`'d
-  from inside it - for that case, fetch the same script directly instead of vendoring it:
+  `script:` input runs each line via `sh -c` (not bash, and not job steps), so neither a composite
+  action's `uses:` nor bash-only process substitution (`bash <(curl ...)`) works from inside it -
+  confirmed live, `sh` rejected `<(` outright ("Syntax error: "(" unexpected"). Pipe into bash
+  instead:
   ```yaml
   script: |
-    bash <(curl -fsSL https://raw.githubusercontent.com/pschmitt/android-app-ci/main/scripts/wait-for-android-emulator.sh)
+    curl -fsSL https://raw.githubusercontent.com/pschmitt/android-app-ci/main/scripts/wait-for-android-emulator.sh | bash
     # ... rest of the capture script
   ```
 - **`enable-kvm`** - grants the job user `/dev/kvm` access on GitHub-hosted runners (without this
