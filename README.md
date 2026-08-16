@@ -25,7 +25,14 @@ denominator.
   by nearly every job below.
 - **`wait-for-android-emulator`** - waits for a booted emulator to actually be ready for UI input,
   not just for `sys.boot_completed`. Replaces each repo's hand-copied `ci/android-e2e-wait.sh` /
-  `ci/android-emulator-wait.sh`.
+  `ci/android-emulator-wait.sh` for use as a normal job step. `android-emulator-runner`'s own
+  `script:` input runs plain inline shell (not job steps), so a composite action can't be `uses:`'d
+  from inside it - for that case, fetch the same script directly instead of vendoring it:
+  ```yaml
+  script: |
+    bash <(curl -fsSL https://raw.githubusercontent.com/pschmitt/android-app-ci/main/scripts/wait-for-android-emulator.sh)
+    # ... rest of the capture script
+  ```
 - **`enable-kvm`** - grants the job user `/dev/kvm` access on GitHub-hosted runners (without this
   the emulator silently falls back to software rendering and takes 15+ minutes to boot).
 - **`decode-ci-keystore`** - thin wrapper around `timheuer/base64-to-file` for the fleet's shared
