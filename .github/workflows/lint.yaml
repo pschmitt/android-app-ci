@@ -31,6 +31,13 @@ on:
           with the fix for a direct push to main with no PR to push into.
         type: boolean
         default: true
+      enable-android-lint:
+        description: >-
+          Run the android-lint job (./gradlew lintDebug) at all. Set false for an app that hasn't
+          been through Android Lint before and has pre-existing findings to triage first - the
+          alternative, an empty lint-baseline-path, still runs and fails lintDebug itself.
+        type: boolean
+        default: true
 
 jobs:
   ktfmt:
@@ -102,6 +109,7 @@ jobs:
 
   android-lint:
     name: Android Lint
+    if: inputs.enable-android-lint
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
