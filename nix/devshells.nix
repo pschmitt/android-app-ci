@@ -132,6 +132,9 @@ in
         android-composition
         pkgs.just
         pkgs.ktfmt
+        # Vendors just/*.just from android-app-ci (see vendir.yml) - `just update-common` runs
+        # `vendir sync`.
+        pkgs.vendir
       ]
       ++ extraPackages;
 
