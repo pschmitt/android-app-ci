@@ -22,7 +22,7 @@ on:
         default: '0.5.15'
 
 concurrency:
-  group: play-store-images-${{ github.workflow }}-${{ github.ref }}
+  group: play-store-assets-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:

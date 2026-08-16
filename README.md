@@ -48,7 +48,7 @@ denominator.
   trigger).
 - **`play-store.yaml`** - signed AAB build + gated Play Console internal-track publish (requires
   the `PLAY_PUBLISH_ENABLED` repo variable, so a fresh checkout can never publish by accident).
-- **`play-store-images.yaml`** - pushes `fastlane/metadata/.../images/**` to the Play Console
+- **`play-store-assets.yaml`** - pushes `fastlane/metadata/.../images/**` to the Play Console
   listing via `gpc` (delegates the actual upload to the caller's own `just screenshots-upload`).
 - **`screenshots-open-pr.yaml`** - the "download capture artifacts, flatten, open/update a PR with
   an inline gallery" tail end of a Screenshots workflow. The `capture` job itself (emulator +
@@ -163,7 +163,7 @@ jobs:
     secrets: inherit
 ```
 
-### `play-store-images.yaml`
+### `play-store-assets.yaml`
 
 ```yaml
 name: Play Store Assets
@@ -174,7 +174,7 @@ on:
   workflow_dispatch:
 jobs:
   upload:
-    uses: pschmitt/android-app-ci/.github/workflows/play-store-images.yaml@main
+    uses: pschmitt/android-app-ci/.github/workflows/play-store-assets.yaml@main
     with:
       application-id: dev.pschmitt.nyetbox
     secrets: inherit
