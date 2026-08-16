@@ -48,7 +48,7 @@ gradle host=remote_host *tasks: (sync host)
 build variant="debug" host=remote_host:
     #!/usr/bin/env bash
     set -euo pipefail
-    git_revision=$(git describe --always --abbrev=12 --dirty)
+    git_revision=$(git describe --always --abbrev=12 --dirty --exclude=latest)
     build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     if [[ "{{variant}}" != "release" || "{{enable_release_signing}}" != "true" ]]; then
       just sync "{{host}}"
