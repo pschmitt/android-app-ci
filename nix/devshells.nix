@@ -15,7 +15,12 @@
 #     inherit pkgs android-nixpkgs system;
 #     appName = "Nyetbox";
 #     buildToolsVersion = "37.0.0";
-#     platformVersion = "37";
+#     platformVersion = "37-0";  # exact android-nixpkgs "platforms-android-*" suffix - not
+#                                 # always just the bare API level, e.g. a preview/extension
+#                                 # level API 37 is "platforms-android-37-0", not "-37". Check
+#                                 # `nix eval github:tadfisher/android-nixpkgs#... --apply builtins.attrNames`
+#                                 # or just try the bare level first and read the "Did you mean
+#                                 # one of ..." error if it's wrong.
 #     gitHooksLib = git-hooks.lib;    # null to skip pre-commit entirely
 #     preCommitExtra = {
 #       check-added-large-files.excludes = [ "^ci/netbox/fixtures/.*\\.dump$" ];
@@ -39,8 +44,12 @@
   # Human-readable app name for the shellHook banner, e.g. "Nyetbox".
   appName,
 
-  # Android build-tools/platform version pins, e.g. "37.0.0" / "37".
+  # Android build-tools version, e.g. "37.0.0" (dots, converted below to the
+  # android-nixpkgs "build-tools-37-0-0" attribute name).
   buildToolsVersion,
+  # Exact android-nixpkgs "platforms-android-*" attribute suffix - not always just the bare API
+  # level (e.g. "36"); a preview/extension level like API 37 is "platforms-android-37-0", not
+  # "-37" - confirmed live via the "Did you mean one of ..." error when it's wrong.
   platformVersion,
 
   # JDK package to use, e.g. pkgs.jdk21.
