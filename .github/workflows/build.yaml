@@ -51,7 +51,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: ${{ inputs.compute-version-name && 0 || 1 }}
+          # NOT `compute-version-name && 0 || 1` - GitHub Actions expressions treat 0 as falsy
+          # for &&/||, same JS-ternary footgun as release.yaml's `publish` input had: when
+          # compute-version-name is true, `true && 0` is `0` (falsy), so `0 || 1` unconditionally
+          # becomes `1` regardless of the input - fetch-depth was silently always 1 (shallow),
+          # even when compute-version-name needed full history for `git describe` to find tags.
+          # Restructured so the potentially-falsy value (0) only ever appears as `||`'s final
+          # fallback, never re-evaluated for truthiness.
+          fetch-depth: ${{ !inputs.compute-version-name && 1 || 0 }}
       - uses: pschmitt/android-app-ci/.github/actions/setup-jdk-gradle@main
         with:
           java-version: ${{ inputs.java-version }}
