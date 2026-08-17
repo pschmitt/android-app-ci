@@ -32,6 +32,9 @@ on:
         type: string
         default: bundleRelease
       aab-path:
+        description: >-
+          Path (or shell glob, e.g. app/phone/build/outputs/bundle/**/*.aab for an AGP
+          flavor-named output directory) to the built release bundle.
         type: string
         default: app/build/outputs/bundle/release/app-release.aab
       version-code:
@@ -124,9 +127,29 @@ jobs:
           [[ -n "$RELEASE_VERSION_NAME" ]] && args+=("-PversionName=$RELEASE_VERSION_NAME")
           ./gradlew "${args[@]}"
 
+      - name: Locate built bundle
+        # aab-path may be a fixed path (the common single-module case) or a glob (e.g. AGP names
+        # a flavor-named module's output directory after the flavor, so the exact path isn't
+        # knowable ahead of time) - resolve it here rather than assuming a literal path everywhere
+        # below.
+        id: locate
+        env:
+          AAB_GLOB: ${{ inputs.aab-path }}
+        run: |
+          shopt -s nullglob globstar
+          matches=( $AAB_GLOB )
+          if [ ${#matches[@]} -eq 0 ]; then
+            echo "No .aab matched aab-path: $AAB_GLOB" >&2
+            exit 1
+          fi
+          if [ ${#matches[@]} -gt 1 ]; then
+            echo "::warning::Multiple .aab matched aab-path ($AAB_GLOB), using the first: ${matches[0]}"
+          fi
+          echo "path=${matches[0]}" >> "$GITHUB_OUTPUT"
+
       - name: Verify bundle output
         run: |
-          bundle="${{ inputs.aab-path }}"
+          bundle="${{ steps.locate.outputs.path }}"
           test -s "$bundle" || {
             echo "Expected signed bundle was not produced: $bundle" >&2
             exit 1
@@ -136,7 +159,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-label }}-${{ github.ref_name }}-aab
-          path: ${{ inputs.aab-path }}
+          path: ${{ steps.locate.outputs.path }}
           if-no-files-found: error
 
   publish-gate:
