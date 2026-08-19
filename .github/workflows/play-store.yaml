@@ -24,9 +24,17 @@ on:
       java-version:
         type: string
         default: '21.0.11'
+      project-directory:
+        description: Directory containing the Gradle project, relative to the repository root
+        type: string
+        default: .
       keystore-file-name:
         type: string
         default: ''
+      unit-test-task:
+        description: Gradle unit-test task, relative to the project (for example :app:testDebugUnitTest)
+        type: string
+        default: testDebugUnitTest
       gradle-bundle-task:
         description: Gradle task that produces the signed release bundle, e.g. bundleRelease or :app:phone:bundleRelease
         type: string
@@ -107,7 +115,8 @@ jobs:
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest
+        working-directory: ${{ inputs.project-directory }}
+        run: ./gradlew ${{ inputs.unit-test-task }}
 
       - name: Build signed Android App Bundle
         # -P overrides are only appended when actually set, so a tag push falls through to the
@@ -121,6 +130,7 @@ jobs:
           CI_KEY_PASSWORD: ${{ secrets.CI_KEY_PASSWORD }}
           GIT_REVISION: ${{ steps.metadata.outputs.revision }}
           BUILD_DATE: ${{ steps.metadata.outputs.date }}
+        working-directory: ${{ inputs.project-directory }}
         run: |
           args=(${{ inputs.gradle-bundle-task }} --stacktrace --build-cache)
           [[ -n "$RELEASE_VERSION_CODE" ]] && args+=("-PversionCode=$RELEASE_VERSION_CODE")
@@ -133,6 +143,7 @@ jobs:
         # knowable ahead of time) - resolve it here rather than assuming a literal path everywhere
         # below.
         id: locate
+        working-directory: ${{ inputs.project-directory }}
         env:
           AAB_GLOB: ${{ inputs.aab-path }}
         run: |
@@ -148,6 +159,7 @@ jobs:
           echo "path=${matches[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Verify bundle output
+        working-directory: ${{ inputs.project-directory }}
         run: |
           bundle="${{ steps.locate.outputs.path }}"
           test -s "$bundle" || {
@@ -159,7 +171,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-label }}-${{ github.ref_name }}-aab
-          path: ${{ steps.locate.outputs.path }}
+          path: ${{ inputs.project-directory }}/${{ steps.locate.outputs.path }}
           if-no-files-found: error
 
   publish-gate:

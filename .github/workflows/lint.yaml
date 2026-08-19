@@ -19,6 +19,10 @@ on:
       java-version:
         type: string
         default: '21.0.11'
+      project-directory:
+        description: Directory containing the Gradle project, relative to the repository root
+        type: string
+        default: .
       lint-baseline-path:
         description: >-
           Path to the app's lint-baseline.xml. Empty string skips the "reject unreviewed
@@ -38,6 +42,10 @@ on:
           alternative, an empty lint-baseline-path, still runs and fails lintDebug itself.
         type: boolean
         default: true
+      lint-report-path:
+        description: Android Lint HTML report path relative to project-directory
+        type: string
+        default: app/build/reports/lint-results-debug.html
 
 jobs:
   ktfmt:
@@ -62,9 +70,11 @@ jobs:
           java-version: ${{ inputs.java-version }}
       - name: Check with ktfmt
         id: ktfmt_check
+        working-directory: ${{ inputs.project-directory }}
         run: ./gradlew ktfmtCheck
       - name: Produce ktfmt diff patch
         if: ${{ failure() && steps.ktfmt_check.outcome == 'failure' }}
+        working-directory: ${{ inputs.project-directory }}
         run: |
           ./gradlew ktfmtFormat
           git diff > /tmp/ktfmt.patch
@@ -123,10 +133,12 @@ jobs:
           java-version: ${{ inputs.java-version }}
       - name: Run Android Lint
         run: ./gradlew lintDebug
+        working-directory: ${{ inputs.project-directory }}
       - name: Reject unreviewed lint-baseline changes
         if: ${{ inputs.lint-baseline-path != '' && !cancelled() }}
         env:
           BASELINE_PATH: ${{ inputs.lint-baseline-path }}
+        working-directory: ${{ inputs.project-directory }}
         run: |
           ./gradlew updateLintBaselineDebug
           # AGP records absolute paths for the version catalog. Keep the reviewed baseline
@@ -138,5 +150,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: android-lint-report
-          path: app/build/reports/lint-results-debug.html
+          path: ${{ inputs.project-directory }}/${{ inputs.lint-report-path }}
           if-no-files-found: warn

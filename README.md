@@ -94,6 +94,22 @@ jobs:
     uses: pschmitt/android-app-ci/.github/workflows/build.yaml@main
 ```
 
+For a Gradle project below a monorepo root, pass `project-directory` and keep `apk-dir` and
+Gradle task names relative to that directory:
+
+```yaml
+jobs:
+  build:
+    uses: pschmitt/android-app-ci/.github/workflows/build.yaml@main
+    with:
+      project-directory: android
+      unit-test-task: :app:testDebugUnitTest
+      gradle-task: :app:assembleDebug
+      apk-dir: app/build/outputs/apk/debug
+      artifact-prefix: app
+    secrets: inherit
+```
+
 Multi-module (jollyfin: `app/phone` + `app/tv`), matrixed over module:
 
 ```yaml
@@ -135,6 +151,12 @@ jobs:
       # enable-release-signing: false  # augh-style unsigned/debug-key release
     secrets: inherit
 ```
+
+All build, lint, release, and Play Store reusable workflows accept the same optional
+`project-directory` input. Paths such as `release-apk-paths`, `debug-apk-paths`, `aab-path`, and
+`lint-report-path` are interpreted relative to it; artifact uploads are resolved back against the
+repository workspace. This keeps callers in monorepos thin without changing the single-project
+defaults.
 
 ### `play-store.yaml`
 

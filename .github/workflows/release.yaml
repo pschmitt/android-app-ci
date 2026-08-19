@@ -31,6 +31,10 @@ on:
       java-version:
         type: string
         default: '21.0.11'
+      project-directory:
+        description: Directory containing the Gradle project, relative to the repository root
+        type: string
+        default: .
       enable-release-signing:
         description: Decode CI_KEYSTORE_BASE64 and sign the release build with it
         type: boolean
@@ -45,6 +49,10 @@ on:
       gradle-release-task:
         type: string
         default: assembleRelease
+      unit-test-task:
+        description: Gradle unit-test task, relative to the project (for example :app:testDebugUnitTest)
+        type: string
+        default: testDebugUnitTest
       release-apk-paths:
         description: Newline-separated list of built release APK paths
         type: string
@@ -73,6 +81,14 @@ on:
         description: Dispatch screenshots.yaml (with open_pr=true) after publishing a real tagged release
         type: boolean
         default: true
+      screenshots-workflow:
+        description: Workflow file or workflow name to dispatch for tagged-release screenshot refreshes
+        type: string
+        default: screenshots.yaml
+      release-log-path:
+        description: Optional repository-relative path passed to git log when generating release notes
+        type: string
+        default: ''
       vacuum-stale-assets:
         description: Delete release assets on the rolling "latest" tag that this run didn't (re)upload
         type: boolean
@@ -164,6 +180,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           APP_DISPLAY_NAME: ${{ inputs.app-display-name }}
           APPLICATION_ID: ${{ inputs.application-id }}
+          RELEASE_LOG_PATH: ${{ inputs.release-log-path }}
         run: |
           set -euo pipefail
 
@@ -213,7 +230,12 @@ jobs:
             echo
             echo "## Summary"
             echo
-            git log --no-merges --format='- %s (%h)' "$release_range"
+            if [[ -n "$RELEASE_LOG_PATH" ]]
+            then
+              git log --no-merges --format='- %s (%h)' "$release_range" -- "$RELEASE_LOG_PATH"
+            else
+              git log --no-merges --format='- %s (%h)' "$release_range"
+            fi
             echo
             if [[ -s "$generated_notes" ]]
             then
@@ -236,7 +258,8 @@ jobs:
           } > release-notes.md
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest
+        working-directory: ${{ inputs.project-directory }}
+        run: ./gradlew ${{ inputs.unit-test-task }}
 
       - name: Build APKs
         # CI_KEYSTORE_* are only exported (not just left empty) when signing is enabled: an app's
@@ -246,6 +269,7 @@ jobs:
         # this exports conditionally in bash instead.
         env:
           GIT_REVISION: ${{ steps.git_revision.outputs.value }}
+        working-directory: ${{ inputs.project-directory }}
         run: |
           if [[ "${{ inputs.enable-release-signing }}" == "true" ]]; then
             export CI_KEYSTORE_PATH="${{ steps.ci_keystore.outputs.path }}"
@@ -261,6 +285,7 @@ jobs:
 
       - name: Verify embedded Android version name
         if: inputs.compute-version-name
+        working-directory: ${{ inputs.project-directory }}
         env:
           EXPECTED_VERSION: ${{ steps.version.outputs.name }}
         run: |
@@ -278,6 +303,7 @@ jobs:
         # Confirms GIT_REVISION actually made it into every release artifact instead of silently
         # falling back to "unknown".
         if: inputs.verify-git-revision
+        working-directory: ${{ inputs.project-directory }}
         env:
           REVISION: ${{ steps.git_revision.outputs.value }}
         run: |
@@ -291,6 +317,7 @@ jobs:
 
       - name: Collect and rename APKs
         id: apks
+        working-directory: ${{ inputs.project-directory }}
         env:
           RENAME_SED: ${{ inputs.apk-rename-sed }}
         run: |
@@ -384,7 +411,7 @@ jobs:
         if: inputs.trigger-screenshots && steps.params.outputs.tag_name != 'latest'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run screenshots.yaml --repo "$GITHUB_REPOSITORY" --ref main -f open_pr=true
+        run: gh workflow run "${{ inputs.screenshots-workflow }}" --repo "$GITHUB_REPOSITORY" --ref main -f open_pr=true
 
       - name: Vacuum stale release assets
         if: steps.params.outputs.vacuum_stale_assets == 'true'
