@@ -60,6 +60,10 @@ on:
       track:
         type: string
         default: internal
+      status:
+        description: Play release status; use draft for the first release of a draft app.
+        type: string
+        default: completed
 
 concurrency:
   group: play-store-${{ github.workflow }}-${{ github.ref }}
@@ -77,6 +81,7 @@ jobs:
         env:
           RELEASE_VERSION_CODE: ${{ inputs.version-code }}
           RELEASE_VERSION_NAME: ${{ inputs.version-name }}
+          RELEASE_STATUS: ${{ inputs.status }}
         run: |
           [[ -z "$RELEASE_VERSION_CODE" || "$RELEASE_VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || {
             echo "version-code must be a positive integer" >&2
@@ -84,6 +89,10 @@ jobs:
           }
           [[ -z "$RELEASE_VERSION_NAME" || "$RELEASE_VERSION_NAME" =~ ^[0-9A-Za-z][0-9A-Za-z.+_-]*$ ]] || {
             echo "version-name contains unsupported characters" >&2
+            exit 1
+          }
+          [[ "$RELEASE_STATUS" =~ ^(draft|inProgress|halted|completed)$ ]] || {
+            echo "status must be draft, inProgress, halted, or completed" >&2
             exit 1
           }
 
@@ -223,4 +232,4 @@ jobs:
           packageName: ${{ inputs.application-id }}
           releaseFiles: ${{ steps.locate.outputs.path }}
           tracks: ${{ inputs.track }}
-          status: completed
+          status: ${{ inputs.status }}
