@@ -35,6 +35,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # `just screenshots-upload` needs the app's justfile imports, which apps vendor as the
+          # .just/android-app-ci submodule (this repo) - without it just fails on `import`.
+          submodules: true
 
       - name: Check publication credentials
         env:
