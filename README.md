@@ -62,8 +62,8 @@ See "Just recipes" and "Nix" below for `just/` and `nix/devshells.nix`.
 
 ## Caller templates
 
-Every reusable workflow needs `secrets: inherit` on the calling job so `CI_KEYSTORE_*`,
-`PLAY_SERVICE_ACCOUNT_JSON`, and `WORKFLOW_PUSH_TOKEN` reach it. Pin `@main` or a tag/SHA per your
+Every reusable workflow needs `secrets: inherit` on the calling job so `CI_KEYSTORE_*`
+and `PLAY_SERVICE_ACCOUNT_JSON` reach it. Pin `@main` or a tag/SHA per your
 risk tolerance - `@main` is simplest and matches how the 4 apps previously trusted a hand-copied
 file anyway, but a tag gives you an explicit upgrade step instead of picking up changes silently.
 

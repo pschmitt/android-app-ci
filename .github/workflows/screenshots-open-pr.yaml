@@ -49,19 +49,8 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # GITHUB_TOKEN can never push a branch whose commit range touches .github/workflows/* - a
-      # repo's main history (including this workflow file's own past fix-up commits) always will,
-      # so every branch built from it trips that restriction regardless of what this job's own
-      # commit changes ("refusing to allow a GitHub App to create or update workflow ... without
-      # `workflows` permission" - not a scope grantable via the `permissions:` key above). Needs a
-      # fine-grained PAT (scoped to just this repo: Contents + Pull requests + Workflows, all read
-      # & write) in the WORKFLOW_PUSH_TOKEN repo secret - falls back to the default token when
-      # that secret isn't set, which reproduces the same failure so it's obvious what's missing
-      # rather than silently no-op-ing.
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          token: ${{ secrets.WORKFLOW_PUSH_TOKEN || github.token }}
 
       - name: Download phone screenshots
         uses: actions/download-artifact@v8
@@ -120,27 +109,76 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit and force-push
+      # Plain GITHUB_TOKEN may push anything except a ref update whose *newly introduced* commits
+      # touch .github/workflows/* ("refusing to allow a GitHub App to create or update workflow
+      # ... without `workflows` permission" - not grantable via `permissions:`). Force-pushing a
+      # branch rebuilt from today's main over the previous run's branch introduces every workflow
+      # change main picked up in between, which is why this used to need a PAT. So the branch
+      # never moves across main's history:
+      # - open PR: the fresh screenshots go on top of its existing branch, a fast-forward
+      #   introducing one images-only commit;
+      # - no open PR: a stale branch (from a merged/closed PR) is deleted and the branch is
+      #   created fresh from main - a new ref only introduces the one screenshot commit, the rest
+      #   is already in the repository.
+      - name: Commit and push
         if: ${{ steps.diff.outputs.changed == 'true' }}
         id: commit
         env:
           COMMIT_MESSAGE: ${{ inputs.commit-message }}
+          GH_TOKEN: ${{ github.token }}
+          SYNC_README: ${{ inputs.sync-readme }}
+          README_IMAGES: ${{ inputs.readme-images }}
         run: |
+          set -euo pipefail
           branch="screenshots/update"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$branch"
-          git commit -m "$COMMIT_MESSAGE"
-          git push --force origin "$branch"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+          paths=(fastlane/metadata/android/en-US/images)
+          if [ "$SYNC_README" = "true" ]; then
+            while IFS= read -r dir; do
+              [ -n "$dir" ] && paths+=("$dir")
+            done < <(printf '%s\n' "$README_IMAGES" | cut -d'|' -f2 | xargs -r -n1 dirname | sort -u)
+          fi
+
+          open_pr="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$open_pr" ] && git fetch --quiet --depth=1 origin "$branch"; then
+            # Move the freshly captured files over onto the PR branch's own tree.
+            snapshot="$(mktemp)"
+            tar -cf "$snapshot" "${paths[@]}"
+            git reset --quiet --hard HEAD
+            git clean -fdq -- "${paths[@]}"
+            git checkout --quiet -B "$branch" FETCH_HEAD
+            rm -rf "${paths[@]}"
+            tar -xf "$snapshot"
+            git add -A -- "${paths[@]}"
+            if git diff --cached --quiet; then
+              echo "Screenshots identical to PR #$open_pr's branch - nothing to push"
+              echo "pushed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git commit --quiet -m "$COMMIT_MESSAGE"
+            git push origin "$branch"
+          else
+            if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+              git push origin --delete "$branch"
+            fi
+            git checkout --quiet -B "$branch"
+            git commit --quiet -m "$COMMIT_MESSAGE"
+            git push origin "$branch"
+          fi
+          {
+            echo "pushed=true"
+            echo "branch=$branch"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
       # The PR diff is just-renamed binary PNGs, next to unreviewable without opening every file -
       # embed each one inline instead, addressed at this exact commit (not the branch, which gets
       # force-pushed again on the next run) so a comment's images never silently change under a
       # reviewer after the fact.
       - name: Build inline image gallery
-        if: ${{ steps.diff.outputs.changed == 'true' }}
+        if: ${{ steps.commit.outputs.pushed == 'true' }}
         id: gallery
         run: |
           sha="${{ steps.commit.outputs.sha }}"
@@ -166,10 +204,13 @@ jobs:
           done
           echo "path=$gallery_file" >> "$GITHUB_OUTPUT"
 
+      # Creating the PR with GITHUB_TOKEN needs the repo's "Allow GitHub Actions to create and
+      # approve pull requests" setting (Settings > Actions > General). Note PRs opened this way
+      # don't trigger other workflows - fine for an images-only change.
       - name: Open or update the PR
-        if: ${{ steps.diff.outputs.changed == 'true' }}
+        if: ${{ steps.commit.outputs.pushed == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PUSH_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.commit.outputs.branch }}
           GALLERY_FILE: ${{ steps.gallery.outputs.path }}
           PR_BODY_INTRO: ${{ inputs.pr-body-intro }}
