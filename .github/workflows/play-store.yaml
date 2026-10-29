@@ -75,7 +75,7 @@ permissions:
 jobs:
   params:
     name: Validate build parameters
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Validate manual overrides
         env:
@@ -99,7 +99,7 @@ jobs:
   bundle:
     name: Validate and build signed AAB
     needs: params
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -187,7 +187,7 @@ jobs:
     name: Reject accidental publishing
     needs: [params, bundle]
     if: ${{ inputs.publish && vars.PLAY_PUBLISH_ENABLED != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Require the repository-level publication gate
         run: |
@@ -199,7 +199,7 @@ jobs:
     name: Upload to Play ${{ inputs.track }} track
     needs: [params, bundle]
     if: ${{ inputs.publish && vars.PLAY_PUBLISH_ENABLED == 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Download Play artifact
         uses: actions/download-artifact@v8
