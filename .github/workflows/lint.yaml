@@ -50,7 +50,7 @@ on:
 jobs:
   ktfmt:
     name: ktfmt
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # No permissions: block here deliberately - a reusable-workflow job that declares permissions
     # exceeding what the calling job grants fails outright (startup_failure, no logs) rather than
     # just running with the lesser set. Letting this job inherit whatever the caller granted means
@@ -124,7 +124,7 @@ jobs:
   android-lint:
     name: Android Lint
     if: inputs.enable-android-lint
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
