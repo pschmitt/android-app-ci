@@ -117,8 +117,9 @@ let
   // pkgs.lib.optionalAttrs ktfmtPreCommit {
     ktfmt = {
       enable = true;
-      package = pkgs.ktfmt;
-      settings.style = "kotlinlang";
+      name = "ktfmt";
+      entry = "${pkgs.ktfmt}/bin/ktfmt --kotlinlang-style";
+      files = "\\.kts?$";
     };
   };
 
