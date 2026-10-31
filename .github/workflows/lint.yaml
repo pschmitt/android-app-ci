@@ -6,8 +6,8 @@ name: Reusable / Lint
 #
 # The ktfmt and Android Lint checks run as independent parallel jobs so a failure in one doesn't
 # hide or block the other - both report in a single run instead of needing a fix-push-fail-fix-push
-# cycle per issue. When ktfmtCheck fails - on any trigger - the `ktfmt` job uploads a
-# `ktfmt-diff-patch` artifact containing exactly what `./gradlew ktfmtFormat` would change, and
+# cycle per issue. When the ktfmt check fails - on any trigger - the `ktfmt` job uploads a
+# `ktfmt-diff-patch` artifact containing exactly what ktfmt would change, and
 # (when enable-auto-fix is true) additionally tries to land that same fix automatically: pushed
 # straight onto a same-repo PR's branch (pre-merge, safe to amend in place), or opened as a new PR
 # when the failure came from a direct push to main with no PR to push into. A fork PR can't be
@@ -46,22 +46,13 @@ on:
         description: Android Lint HTML report path relative to project-directory
         type: string
         default: app/build/reports/lint-results-debug.html
-      ktfmt-runner:
+      ktfmt-flake-ref:
         description: >-
-          How the ktfmt job formats/checks: `gradle` runs the project's pinned Gradle plugin
-          (`./gradlew ktfmtCheck`); `nix` runs the `ktfmt` that `nix develop` provides in
-          `ktfmt-nix-directory` with kotlinlang style - the same binary the repo's pre-commit hook
-          uses, so local and CI formatting cannot drift apart. A repo switching to `nix` must
-          reformat once (the two ktfmt versions differ) and should drop `ktfmtCheck` from its own
-          local checks.
+          Flake reference (relative to the repository root) of the devShell that provides `ktfmt`.
+          The `ktfmt` devShell from `nix/devshells.nix` is just ktfmt from the app's locked nixpkgs,
+          the same binary its pre-commit hook runs.
         type: string
-        default: gradle
-      ktfmt-nix-directory:
-        description: >-
-          Directory (relative to the repository root) whose flake devShell provides `ktfmt`, for
-          ktfmt-runner `nix`. Should be the flake that also drives the pre-commit hook.
-        type: string
-        default: .
+        default: .#ktfmt
 
 jobs:
   ktfmt:
@@ -81,42 +72,24 @@ jobs:
           # For a PR, check out the actual head branch rather than the ephemeral merge ref, so a
           # formatting fix (below) can be pushed straight back onto it.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
-      - uses: pschmitt/android-app-ci/.github/actions/setup-jdk-gradle@main
-        if: ${{ inputs.ktfmt-runner == 'gradle' }}
-        with:
-          java-version: ${{ inputs.java-version }}
       - name: Install Nix
-        if: ${{ inputs.ktfmt-runner == 'nix' }}
         uses: cachix/install-nix-action@v31
       - name: Check with ktfmt
         id: ktfmt_check
         env:
-          RUNNER: ${{ inputs.ktfmt-runner }}
-          NIX_DIR: ${{ inputs.ktfmt-nix-directory }}
+          FLAKE_REF: ${{ inputs.ktfmt-flake-ref }}
           PROJECT_DIR: ${{ inputs.project-directory }}
         run: |
-          if [[ "$RUNNER" == nix ]]
-          then
-            git ls-files -z -- "$PROJECT_DIR" ':(glob)**/*.kt' ':(glob)**/*.kts' |
-              xargs -0 nix develop "$NIX_DIR" --command ktfmt --kotlinlang-style --dry-run --set-exit-if-changed
-          else
-            cd "$PROJECT_DIR"
-            ./gradlew ktfmtCheck
-          fi
+          git ls-files -z -- "$PROJECT_DIR" ':(glob)**/*.kt' ':(glob)**/*.kts' |
+            xargs -0 nix develop "$FLAKE_REF" --command ktfmt --kotlinlang-style --dry-run --set-exit-if-changed
       - name: Produce ktfmt diff patch
         if: ${{ failure() && steps.ktfmt_check.outcome == 'failure' }}
         env:
-          RUNNER: ${{ inputs.ktfmt-runner }}
-          NIX_DIR: ${{ inputs.ktfmt-nix-directory }}
+          FLAKE_REF: ${{ inputs.ktfmt-flake-ref }}
           PROJECT_DIR: ${{ inputs.project-directory }}
         run: |
-          if [[ "$RUNNER" == nix ]]
-          then
-            git ls-files -z -- "$PROJECT_DIR" ':(glob)**/*.kt' ':(glob)**/*.kts' |
-              xargs -0 nix develop "$NIX_DIR" --command ktfmt --kotlinlang-style
-          else
-            (cd "$PROJECT_DIR" && ./gradlew ktfmtFormat)
-          fi
+          git ls-files -z -- "$PROJECT_DIR" ':(glob)**/*.kt' ':(glob)**/*.kts' |
+            xargs -0 nix develop "$FLAKE_REF" --command ktfmt --kotlinlang-style
           git diff > /tmp/ktfmt.patch
       - name: Upload ktfmt diff patch
         if: ${{ failure() && steps.ktfmt_check.outcome == 'failure' }}
@@ -154,7 +127,7 @@ jobs:
           commit-message: "style: apply ktfmt formatting"
           title: "style: apply ktfmt formatting"
           body: >-
-            Automated ktfmt formatting fix - `ktfmtCheck` failed on
+            Automated ktfmt formatting fix - the ktfmt check failed on
             ${{ github.sha }} (`${{ github.ref_name }}`).
           branch: ci/ktfmt-format-fix
           add-paths: |

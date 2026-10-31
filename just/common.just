@@ -26,12 +26,10 @@
 # Variables an importing justfile must define before this recipe is used:
 #   play_package  - Play Console packageName, only needed for `screenshots-upload`
 
-# Format Kotlin sources locally with ktfmt (lightweight - not a Gradle build, safe to run on this
-# machine). CAUTION: this is nixpkgs' standalone ktfmt, which may be a newer version than the one
-# CI actually uses (see gradle/libs.versions.toml) - treat this as an advisory quick pass, not a
-# substitute for CI's real ktfmtCheck.
+# Format Kotlin sources with the flake's nixpkgs ktfmt - the exact binary CI and the pre-commit hook
+# use (lightweight, not a Gradle build, safe to run on this machine).
 format:
-    ktfmt --kotlinlang-style $(git ls-files '*.kt' '*.kts')
+    git ls-files -z '*.kt' '*.kts' | xargs -0 nix develop .#ktfmt --command ktfmt --kotlinlang-style
 
 # Nix formatting for this repo's flake.nix.
 nix-fmt:

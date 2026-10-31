@@ -26,17 +26,10 @@ physical device it has no recipes for) don't apply to it; its own `AGENTS.md` sa
   `nix/devshells.nix` in this repo - trailing whitespace, EOF fixer, merge-conflict/large-file
   checks, `nixfmt`, `statix`). The generated `.pre-commit-config.yaml` is gitignored - it's
   regenerated from `flake.nix` on every shell entry, don't hand-edit it.
-  - **Opt-in `ktfmt` hook** (`ktfmtPreCommit = true` in `nix/devshells.nix`, paired with
-    `ktfmt-runner: nix` in the caller's `lint.yaml` call): both then use the flake's nixpkgs `ktfmt`
-    (kotlinlang style), so local and CI formatting cannot drift. Reformat the app once when
-    switching, and drop `ktfmtCheck` from its local checks (the Gradle plugin's ktfmt differs).
-  - Default (not opted in): deliberately **no** `ktfmt` pre-commit hook: nixpkgs only ships a recent standalone `ktfmt`,
-    but each app's Gradle plugin pins an older `ktfmt` (see its `gradle/libs.versions.toml`), and
-    the two format some constructs differently - a hook running the wrong version could "fix" a
-    file into a state that then fails CI's real `ktfmtCheck`. Confirmed live on jollyfin: it once
-    inserted spurious blank lines between every `include()` in `settings.gradle.kts`. Use
-    `just lint` (runs the pinned Gradle plugin remotely) as the authoritative check - `just
-    format` is a quick local pass, but treat its output as advisory, not final (see below).
+  - **ktfmt is nix-only**: the pre-commit hook, `just lint`/`just format` and CI's lint workflow
+    all run the same nixpkgs `ktfmt` (kotlinlang style) from the app's own `flake.lock`, so local
+    and CI formatting cannot drift. The apps do not use the ktfmt Gradle plugin (it pinned a
+    different ktfmt version); `just lint` is `ktfmt --dry-run` and runs locally, no Gradle.
 - Prefer the `justfile` recipes over raw `./gradlew`/`ssh`/`adb` invocations - run `just --list`
   for the full set. `nix develop`'s shellHook also auto-runs `git submodule update --init` on
   every entry, so a fresh git worktree (this fleet creates plenty for agent-driven work) never
@@ -51,21 +44,17 @@ physical device it has no recipes for) don't apply to it; its own `AGENTS.md` sa
   local judgment.** Confirmed the hard way more than once: a change that passed a local/remote
   check still failed CI's `Lint` job after being pushed. If CI's `Lint` job fails:
   - `.github/workflows/lint.yaml`'s `ktfmt` job auto-uploads a `ktfmt-diff-patch` artifact
-    whenever `ktfmtCheck` fails - on any trigger, push/PR or manual (`gh workflow run
-    lint.yaml` to get one preemptively). It contains exactly what `./gradlew ktfmtFormat` would
-    change, computed in the same environment CI's `ktfmtCheck` uses. Grab it with
+    whenever the ktfmt check fails - on any trigger, push/PR or manual (`gh workflow run
+    lint.yaml` to get one preemptively). It contains exactly what the flake's `ktfmt` would
+    change. Normally the pre-commit hook already prevents this; if it does fail, grab it with
     `gh run download <run-id> -n ktfmt-diff-patch` and apply it (`git apply`) rather than
     guessing or reformatting by hand.
   - Fix every lint/format violation CI reports before calling a change done, even in files the
     current change didn't touch or author - don't scope a fix to "only the lines I changed" if CI
     flags something adjacent. Never disable, skip, or baseline around a lint failure to make it
     go away; fix the actual violation.
-  - `just format` runs the local `ktfmt` CLI over *every* tracked `.kt`/`.kts` file in the repo,
-    not just the ones a change touched - combined with the local/CI ktfmt version drift above,
-    this can silently reformat (and sometimes visibly worsen the formatting of) dozens of
-    unrelated files in one run. Diff-review its output before committing; `git checkout --
-    <file>` anything it touched outside the actual change, don't assume every file it modified
-    was an intended fix.
+  - `just format` runs the flake's `ktfmt` over every tracked `.kt`/`.kts` file; since it is the
+    same binary as the hook and CI it is authoritative, and on a formatted tree it changes nothing.
 - Never tag a release from a commit whose CI hasn't gone green on that exact commit's SHA - not
   an assumption, not an older green run. `gh run list --branch main --limit 5` (check the commit
   SHA column) or `gh run list --commit <sha>`. If a tag was already pushed and CI on it fails,
