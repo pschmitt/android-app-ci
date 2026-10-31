@@ -90,9 +90,7 @@ let
   );
 
   android-composition-screenshots = android-nixpkgs.sdk.${system} (
-    sdkPkgs:
-    with sdkPkgs;
-    [
+    sdkPkgs: with sdkPkgs; [
       cmdline-tools-latest
       platform-tools
       emulator
@@ -135,53 +133,51 @@ in
       ]
       ++ extraPackages;
 
-      shellHook =
-        (if pre-commit-check != null then pre-commit-check.shellHook else "")
-        + ''
-          echo "Development environment: ${appName}"
+      shellHook = (if pre-commit-check != null then pre-commit-check.shellHook else "") + ''
+        echo "Development environment: ${appName}"
 
-          # git worktree add doesn't check out submodules by default, so a fresh agent worktree
-          # (this fleet creates a lot of them - .claude/worktrees/, .codex/worktrees/, ...) would
-          # otherwise leave .just/android-app-ci empty until someone remembers to run
-          # `git submodule update --init` by hand - which breaks every `just` invocation outright,
-          # since `import`ing a file that doesn't exist yet is a hard parse error, not a soft
-          # skip. Auto-init on every shell entry instead so this is never a manual step.
-          if [ -f .gitmodules ] && git rev-parse --git-dir >/dev/null 2>&1; then
-            git submodule update --init --recursive --quiet
-          fi
+        # git worktree add doesn't check out submodules by default, so a fresh agent worktree
+        # (this fleet creates a lot of them - .claude/worktrees/, .codex/worktrees/, ...) would
+        # otherwise leave .just/android-app-ci empty until someone remembers to run
+        # `git submodule update --init` by hand - which breaks every `just` invocation outright,
+        # since `import`ing a file that doesn't exist yet is a hard parse error, not a soft
+        # skip. Auto-init on every shell entry instead so this is never a manual step.
+        if [ -f .gitmodules ] && git rev-parse --git-dir >/dev/null 2>&1; then
+          git submodule update --init --recursive --quiet
+        fi
 
-          export JAVA_HOME=${jdk}/lib/openjdk
-          export ANDROID_SDK_ROOT=${android-composition}/share/android-sdk
-          export ANDROID_HOME=$ANDROID_SDK_ROOT
-          export PATH=$PATH:$ANDROID_SDK_ROOT/platform-tools
-          export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
-          export PATH=$PATH:$ANDROID_SDK_ROOT/build-tools/${buildToolsVersion}
-          export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.project.android.aapt2FromMavenOverride=$ANDROID_SDK_ROOT/build-tools/${buildToolsVersion}/aapt2"
+        export JAVA_HOME=${jdk}/lib/openjdk
+        export ANDROID_SDK_ROOT=${android-composition}/share/android-sdk
+        export ANDROID_HOME=$ANDROID_SDK_ROOT
+        export PATH=$PATH:$ANDROID_SDK_ROOT/platform-tools
+        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
+        export PATH=$PATH:$ANDROID_SDK_ROOT/build-tools/${buildToolsVersion}
+        export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.project.android.aapt2FromMavenOverride=$ANDROID_SDK_ROOT/build-tools/${buildToolsVersion}/aapt2"
 
-          # Removing sdk.dir from local.properties if present, otherwise aidl fails to run.
-          if [ -f local.properties ]; then
-            sed -i -E '/^sdk\.dir=/d' local.properties
-          fi
+        # Removing sdk.dir from local.properties if present, otherwise aidl fails to run.
+        if [ -f local.properties ]; then
+          sed -i -E '/^sdk\.dir=/d' local.properties
+        fi
 
-          echo "Java version: $(java -version 2>&1 | head -n1)"
-          echo "Available commands: ./gradlew, adb, aapt2, just, ktfmt"
+        echo "Java version: $(java -version 2>&1 | head -n1)"
+        echo "Available commands: ./gradlew, adb, aapt2, just, ktfmt"
+        echo ""
+        if [ "$(hostname)" != "rofl-13" ] && [ "$(hostname)" != "rofl-14" ]; then
+          echo "Don't run ./gradlew directly on this machine - see AGENTS.md."
+          echo "Use the 'just' recipes below, which build on rofl-13/rofl-14 instead:"
           echo ""
-          if [ "$(hostname)" != "rofl-13" ] && [ "$(hostname)" != "rofl-14" ]; then
-            echo "Don't run ./gradlew directly on this machine - see AGENTS.md."
-            echo "Use the 'just' recipes below, which build on rofl-13/rofl-14 instead:"
-            echo ""
-            echo "Quick start:"
-            echo "  just build                    # Build debug APK on rofl-13"
-            echo "  just build-fetch              # ...and copy it back to ./dist"
-            echo "  just --list                   # See all available recipes"
-            ${quickStart}
-          else
-            echo "Quick start (on a remote build host):"
-            echo "  ./gradlew :app:assembleDebug   # Build debug APK"
-            echo "  ./gradlew :app:installDebug    # Install to connected device"
-            echo "  ./gradlew test"
-          fi
-        '';
+          echo "Quick start:"
+          echo "  just build                    # Build debug APK on rofl-13"
+          echo "  just build-fetch              # ...and copy it back to ./dist"
+          echo "  just --list                   # See all available recipes"
+          ${quickStart}
+        else
+          echo "Quick start (on a remote build host):"
+          echo "  ./gradlew :app:assembleDebug   # Build debug APK"
+          echo "  ./gradlew :app:installDebug    # Install to connected device"
+          echo "  ./gradlew test"
+        fi
+      '';
     };
   }
   // pkgs.lib.optionalAttrs (screenshotsSystemImage != null) {
