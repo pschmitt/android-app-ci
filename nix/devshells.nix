@@ -66,6 +66,11 @@
   # Extra/overriding hooks merged into the default set below, e.g. to add per-repo
   # check-added-large-files excludes.
   preCommitExtra ? { },
+  # Add a ktfmt pre-commit hook (nixpkgs' ktfmt, kotlinlang style) - the same binary the devShell
+  # provides. Only enable it together with `ktfmt-runner: nix` in the lint workflow call: nixpkgs'
+  # ktfmt formats some constructs differently from the Gradle plugin's pinned one, so a hook that
+  # disagrees with CI's check would "fix" files into a state CI then rejects.
+  ktfmtPreCommit ? false,
 
   # Set to null to skip the "screenshots" devShell entirely (jollyfin/syncwich don't have local
   # AVD-based screenshot capture, only CI-driven capture).
@@ -106,11 +111,15 @@ let
     check-yaml.enable = true;
     nixfmt.enable = true;
     statix.enable = true;
-    # No ktfmt pre-commit hook: nixpkgs only ships a recent standalone ktfmt, but the project's
-    # Gradle plugin pins an older ktfmt (see gradle/libs.versions.toml), and the two format some
-    # constructs differently. A hook running the wrong version could "fix" a file into a state
-    # that then fails CI's real `./gradlew ktfmtCheck`. Use `just lint` (remote, runs the pinned
-    # Gradle plugin) as the authoritative check instead.
+    # No ktfmt hook by default: nixpkgs' ktfmt differs from the Gradle plugin's pinned one, so it
+    # is only safe when CI also checks with nixpkgs' ktfmt - see `ktfmtPreCommit` above.
+  }
+  // pkgs.lib.optionalAttrs ktfmtPreCommit {
+    ktfmt = {
+      enable = true;
+      package = pkgs.ktfmt;
+      settings.style = "kotlinlang";
+    };
   };
 
   pre-commit-check =

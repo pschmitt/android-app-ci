@@ -43,6 +43,8 @@ denominator.
 ### Reusable workflows (`.github/workflows/`, all `on: workflow_call`)
 
 - **`lint.yaml`** - ktfmt + Android Lint, with the ktfmt auto-fix-PR behavior.
+  `ktfmt-runner: nix` (plus `ktfmt-nix-directory`) checks with the flake's nixpkgs `ktfmt` instead
+  of the Gradle plugin, matching the opt-in `ktfmtPreCommit` devShell hook.
 - **`build.yaml`** - debug build + unit tests + per-ABI artifact upload. Parameterized enough to
   call twice for a multi-module app (see jollyfin's template below).
 - **`release.yaml`** - the full signed-APK GitHub Release pipeline (rolling "latest" prerelease +

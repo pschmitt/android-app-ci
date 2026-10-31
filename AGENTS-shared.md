@@ -26,7 +26,11 @@ physical device it has no recipes for) don't apply to it; its own `AGENTS.md` sa
   `nix/devshells.nix` in this repo - trailing whitespace, EOF fixer, merge-conflict/large-file
   checks, `nixfmt`, `statix`). The generated `.pre-commit-config.yaml` is gitignored - it's
   regenerated from `flake.nix` on every shell entry, don't hand-edit it.
-  - Deliberately **no** `ktfmt` pre-commit hook: nixpkgs only ships a recent standalone `ktfmt`,
+  - **Opt-in `ktfmt` hook** (`ktfmtPreCommit = true` in `nix/devshells.nix`, paired with
+    `ktfmt-runner: nix` in the caller's `lint.yaml` call): both then use the flake's nixpkgs `ktfmt`
+    (kotlinlang style), so local and CI formatting cannot drift. Reformat the app once when
+    switching, and drop `ktfmtCheck` from its local checks (the Gradle plugin's ktfmt differs).
+  - Default (not opted in): deliberately **no** `ktfmt` pre-commit hook: nixpkgs only ships a recent standalone `ktfmt`,
     but each app's Gradle plugin pins an older `ktfmt` (see its `gradle/libs.versions.toml`), and
     the two format some constructs differently - a hook running the wrong version could "fix" a
     file into a state that then fails CI's real `ktfmtCheck`. Confirmed live on jollyfin: it once
