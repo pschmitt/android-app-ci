@@ -13,9 +13,8 @@ fleet of Kotlin/Compose Android apps: [nyetbox](https://github.com/pschmitt/nyet
 These apps started as copies of each other and kept drifting - the same CI pipeline
 hand-ported from repo to repo, picking up small inconsistencies and missed features each time
 (see git blame/comments like "ported from the sibling nyetbox project's screenshot/E2E CI" in
-several of those repos). This repo is the canonical version of that shared pipeline: each
-consuming app keeps a thin caller workflow with its own triggers/parameters and calls out here
-with `uses:`, instead of vendoring the whole thing.
+several of those repos). The canonical shared pipeline now lives in `pschmitt/ci-workflows`. This repository
+retains its legacy implementation for existing consumers.
 
 Where the 4 apps' existing workflows disagreed on how complete a feature was (e.g. one repo's
 `release.yaml` had asset-vacuuming and screenshot-triggering, another had only one of the two),
