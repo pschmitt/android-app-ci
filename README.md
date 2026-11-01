@@ -1,5 +1,10 @@
 # android-app-ci
 
+> The shared Android CI interfaces have moved to
+> [pschmitt/ci-workflows](https://github.com/pschmitt/ci-workflows/blob/main/docs/android-ci.md).
+> This repository remains available for existing callers during migration; use
+> `ci-workflows` for new integrations and updates.
+
 Shared GitHub Actions (and a shared Nix devShell builder) for [@pschmitt](https://github.com/pschmitt)'s
 fleet of Kotlin/Compose Android apps: [nyetbox](https://github.com/pschmitt/nyetbox),
 [augh](https://github.com/pschmitt/augh), [jollyfin](https://github.com/pschmitt/jollyfin), and
